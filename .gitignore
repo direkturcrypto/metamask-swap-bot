@@ -8,3 +8,5 @@ dist/
 build/
 coverage/
 wallets.json
+REWARDS-API-DOCS.md
+.rewards-sessions.json

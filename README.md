@@ -81,6 +81,14 @@ The tool will:
 - Load wallets.
 - Loop through each wallet every 60 seconds and apply the swap rules.
 
+**MetaMask Transaction API**
+
+- The bot signs each transaction locally (approval/trade) and submits it to MetaMask’s Transaction API at `TX_SUBMIT_BASE` using your `CHAIN_ID` (e.g., `8453`).
+- It polls `batchStatus` until settled and then waits for 2 confirmations on the mined hash via your RPC.
+- Configure via `.env`:
+  - `TX_SUBMIT_BASE=https://transaction.api.cx.metamask.io`
+  - `STX_CONTROLLER_VERSION=18.1.0`
+
 **Notes on ETH/WETH**
 
 - The quote requests use the WETH address for ETH legs. The tool ensures WETH exists for ETH->USDC by wrapping ETH as needed, and unwraps any received WETH back to native ETH after USDC->ETH to complete the cycle in ETH.

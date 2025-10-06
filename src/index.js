@@ -14,9 +14,18 @@ const {
   GAS_PRICE_MAX_GWEI,
   DELAY_SECONDS_MIN,
   DELAY_SECONDS_MAX,
+  TX_SUBMIT_BASE,
+  STX_CONTROLLER_VERSION,
+  DEBUG,
+  REWARDS_API_URL,
+  REWARDS_CLIENT_ID,
+  REWARDS_LANGUAGE,
+  REWARDS_REFERRAL_CODE,
+  REWARDS_SESSIONS_PATH,
   loadWallets
 } = require('./config');
 const { validateEnvironment, cycleWallet } = require('./swapper');
+const { ensureSession, getCurrentSeason } = require('./rewards');
 const { sleep } = require('./utils');
 
 async function main() {
@@ -55,6 +64,11 @@ async function main() {
     GAS_PRICE_MAX_GWEI,
     DELAY_SECONDS_MIN,
     DELAY_SECONDS_MAX,
+    TX_SUBMIT_BASE,
+    STX_CONTROLLER_VERSION,
+    DEBUG,
+    REWARDS_API_URL,
+    REWARDS_CLIENT_ID,
     USDC_ADDRESS,
     WETH_ADDRESS
   });
@@ -63,6 +77,22 @@ async function main() {
     console.log('\n================ CYCLE START ================');
     for (const w of wallets) {
       try {
+        // Rewards: ensure session and show current points
+        const signer = new ethers.Wallet(w.privateKey, provider);
+        const { sessionId } = await ensureSession({
+          baseUrl: REWARDS_API_URL,
+          clientId: REWARDS_CLIENT_ID,
+          sessionsPath: REWARDS_SESSIONS_PATH,
+          signer,
+          address: w.address,
+          referralCode: REWARDS_REFERRAL_CODE,
+          language: REWARDS_LANGUAGE,
+          debug: DEBUG
+        });
+        const season = await getCurrentSeason({ baseUrl: REWARDS_API_URL, clientId: REWARDS_CLIENT_ID, sessionId, language: REWARDS_LANGUAGE, debug: DEBUG });
+        const points = season?.balance?.total ?? season?.balance?.points ?? null;
+        console.log(`🏆 Rewards session ok | Season: ${season?.season?.name || season?.season?.id || 'current'} | Points: ${points ?? 'n/a'}`);
+
         await cycleWallet({ provider, wallet: w, config: {
           CHAIN_ID,
           QUOTE_API_BASE,
@@ -76,7 +106,14 @@ async function main() {
           ETH_MIN_SWAP,
           GAS_PRICE_MAX_GWEI,
           DELAY_SECONDS_MIN,
-          DELAY_SECONDS_MAX
+          DELAY_SECONDS_MAX,
+          TX_SUBMIT_BASE,
+          STX_CONTROLLER_VERSION,
+          DEBUG,
+          REWARDS_API_URL,
+          REWARDS_CLIENT_ID,
+          REWARDS_LANGUAGE,
+          REWARDS_SESSION_ID: sessionId
         }});
       } catch (err) {
         console.error(`❌ Wallet ${w.address} error:`, err.message || err);
