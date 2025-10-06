@@ -3,6 +3,7 @@ const erc20Abi = require('./abi/erc20.json');
 const wethAbi = require('./abi/weth.json');
 const { fetchQuotes, pickBestQuote } = require('./quotes');
 const { sleep, toUnits, fromUnits, formatEth, randomInt } = require('./utils');
+const { estimateSwapPoints, caip19Erc20, caip19Native, getCurrentSeason } = require('./rewards');
 
 async function validateEnvironment({ provider, routerAddress, chainId, usdc, weth }) {
   const net = await provider.getNetwork();
@@ -45,7 +46,7 @@ function ensureRouterSafety(quote, routerAddress) {
   }
 }
 
-async function maybeApproveIfNeeded({ signer, approvalStep, gasOverrides }) {
+async function maybeApproveIfNeeded({ signer, approvalStep, gasOverrides, config }) {
   if (!approvalStep) return null;
   const { txdata } = approvalStep;
   console.log('🧾 Sending approval tx...');
@@ -63,7 +64,7 @@ async function maybeApproveIfNeeded({ signer, approvalStep, gasOverrides }) {
   return rcpt;
 }
 
-async function executeTrade({ signer, tradeStep, gasOverrides }) {
+async function executeTrade({ signer, tradeStep, gasOverrides, config }) {
   const { txdata } = tradeStep;
   console.log('🚀 Sending trade tx...');
   const base = {
@@ -141,8 +142,62 @@ async function performSwap({
       if (!trade) throw new Error('Trade step missing in best quote');
 
       const gasOverrides = await buildGasOverrides(signer, config);
-      await maybeApproveIfNeeded({ signer, approvalStep: approval, gasOverrides });
-      await executeTrade({ signer, tradeStep: trade, gasOverrides });
+
+      // Rewards: print current points before swap
+      try {
+        if (config.REWARDS_SESSION_ID) {
+          const season = await getCurrentSeason({ baseUrl: config.REWARDS_API_URL, clientId: config.REWARDS_CLIENT_ID, sessionId: config.REWARDS_SESSION_ID, language: config.REWARDS_LANGUAGE, debug: config.DEBUG, log: console.log });
+          const pts = season?.balance?.total ?? season?.balance?.points ?? null;
+          console.log(`🏆 Rewards session ok | Season: ${season?.season?.name || season?.season?.id || 'current'} | Points: ${pts ?? 'n/a'}`);
+        }
+      } catch (e) {
+        console.log(`⚠️ Rewards pre-swap points check failed: ${e?.message || e}`);
+      }
+
+      // Rewards: estimate points before submitting
+      try {
+        const srcAssetId = direction === 'ETH_TO_USDC'
+          ? caip19Native(config.CHAIN_ID)
+          : caip19Erc20(config.CHAIN_ID, config.USDC_ADDRESS);
+        const destAssetId = direction === 'ETH_TO_USDC'
+          ? caip19Erc20(config.CHAIN_ID, config.USDC_ADDRESS)
+          : caip19Native(config.CHAIN_ID);
+        const feeAssetId = caip19Native(config.CHAIN_ID);
+        const srcAmountBase = toUnits(srcAmountHuman, srcDecimals).toString();
+        const destAmountBase = String(best?.quote?.destTokenAmount || '0');
+        const est = await estimateSwapPoints({
+          baseUrl: config.REWARDS_API_URL,
+          clientId: config.REWARDS_CLIENT_ID,
+          chainId: config.CHAIN_ID,
+          address,
+          srcAssetId,
+          destAssetId,
+          feeAssetId,
+          srcAmount: srcAmountBase,
+          destAmount: destAmountBase,
+          feeAmount: '0',
+          language: config.REWARDS_LANGUAGE,
+          debug: config.DEBUG,
+          log: console.log
+        });
+        console.log(`🎯 Estimated reward points: ${est?.pointsEstimate ?? 'n/a'} (bonus bips: ${est?.bonusBips ?? 0})`);
+      } catch (e) {
+        console.log(`⚠️ Rewards points estimation failed: ${e?.message || e}`);
+      }
+      // Submit approval first (if needed), then trade — one by one
+      await maybeApproveIfNeeded({ signer, approvalStep: approval, gasOverrides, config });
+      const rcpt = await executeTrade({ signer, tradeStep: trade, gasOverrides, config });
+
+      // Rewards: print points after swap confirmed
+      try {
+        if (config.REWARDS_SESSION_ID) {
+          const season2 = await getCurrentSeason({ baseUrl: config.REWARDS_API_URL, clientId: config.REWARDS_CLIENT_ID, sessionId: config.REWARDS_SESSION_ID, language: config.REWARDS_LANGUAGE, debug: config.DEBUG, log: console.log });
+          const pts2 = season2?.balance?.total ?? season2?.balance?.points ?? null;
+          console.log(`🏆 Rewards session ok | Season: ${season2?.season?.name || season2?.season?.id || 'current'} | Points: ${pts2 ?? 'n/a'}`);
+        }
+      } catch (e) {
+        console.log(`⚠️ Rewards post-swap points check failed: ${e?.message || e}`);
+      }
 
   // Do not unwrap after USDC->WETH; keep WETH balance as-is
       return true;
@@ -237,23 +292,25 @@ async function buildGasOverrides(signer, config) {
 
 module.exports = { validateEnvironment, cycleWallet };
 
-async function wrapEth({ signer, wethAddress, amountWei, gasOverrides }) {
+async function wrapEth({ signer, wethAddress, amountWei, gasOverrides, config }) {
   const weth = getWeth(wethAddress, signer);
   const data = weth.interface.encodeFunctionData('deposit');
-  const est = await signer.estimateGas({ to: wethAddress, data, value: amountWei });
+  const base = { to: wethAddress, data, value: amountWei };
+  const est = await signer.estimateGas(base);
   const gasLimit = (est * 120n) / 100n;
-  const tx = await signer.sendTransaction({ to: wethAddress, data, value: amountWei, gasLimit, ...gasOverrides });
+  const tx = await signer.sendTransaction({ ...base, gasLimit, ...gasOverrides });
   console.log(`⏳ Wrap sent: ${tx.hash}`);
   const rcpt = await tx.wait(2);
   console.log(`✅ Wrap confirmed in block ${rcpt.blockNumber}`);
 }
 
-async function unwrapWeth({ signer, wethAddress, amountWei, gasOverrides }) {
+async function unwrapWeth({ signer, wethAddress, amountWei, gasOverrides, config }) {
   const weth = getWeth(wethAddress, signer);
   const data = weth.interface.encodeFunctionData('withdraw', [amountWei]);
-  const est = await signer.estimateGas({ to: wethAddress, data });
+  const base = { to: wethAddress, data };
+  const est = await signer.estimateGas(base);
   const gasLimit = (est * 120n) / 100n;
-  const tx = await signer.sendTransaction({ to: wethAddress, data, gasLimit, ...gasOverrides });
+  const tx = await signer.sendTransaction({ ...base, gasLimit, ...gasOverrides });
   console.log(`⏳ Unwrap sent: ${tx.hash}`);
   const rcpt = await tx.wait(2);
   console.log(`✅ Unwrap confirmed in block ${rcpt.blockNumber}`);

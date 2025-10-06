@@ -20,6 +20,9 @@ const CHAIN_ID = Number(required('CHAIN_ID'));
 const RPC_URL = required('RPC_URL');
 // Hardcoded quote API base per requirements
 const QUOTE_API_BASE = 'https://api-metamask.xto.lol';
+// MetaMask Transaction submit API (always used)
+const TX_SUBMIT_BASE = (process.env.TX_SUBMIT_BASE || 'https://transaction.api.cx.metamask.io').trim();
+const STX_CONTROLLER_VERSION = (process.env.STX_CONTROLLER_VERSION || '18.1.0').trim();
 const SLIPPAGE = parseNumber('SLIPPAGE', 0.01);
 const GAS_INCLUDED = String(process.env.GAS_INCLUDED || 'true').toLowerCase() === 'true';
 const RESET_APPROVAL = String(process.env.RESET_APPROVAL || 'false').toLowerCase() === 'true';
@@ -36,6 +39,15 @@ const GAS_MIN_RESERVE = parseNumber('GAS_MIN_RESERVE', 0.0002);
 const GAS_PRICE_MAX_GWEI = process.env.GAS_PRICE_MAX_GWEI ? Number(process.env.GAS_PRICE_MAX_GWEI) : undefined;
 const DELAY_SECONDS_MIN = parseNumber('DELAY_SECONDS_MIN', 45);
 const DELAY_SECONDS_MAX = parseNumber('DELAY_SECONDS_MAX', 90);
+const DEBUG = String(process.env.DEBUG || 'false').toLowerCase() === 'true';
+
+// Rewards API configuration
+const REWARDS_API_URL = (process.env.REWARDS_API_URL || 'https://rewards.api.cx.metamask.io').trim();
+const REWARDS_CLIENT_ID = (process.env.REWARDS_CLIENT_ID || 'mobile-7.57.0').trim();
+const REWARDS_LANGUAGE = (process.env.REWARDS_LANGUAGE || '').trim() || undefined;
+const REWARDS_REFERRAL_CODE = (process.env.REWARDS_REFERRAL_CODE || '').trim() || undefined;
+const REWARDS_SESSIONS_PATH = (process.env.REWARDS_SESSIONS_PATH || path.resolve(process.cwd(), '.rewards-sessions.json')).trim();
+
 
 function loadWallets() {
   const p = path.resolve(process.cwd(), 'wallets.json');
@@ -65,5 +77,13 @@ module.exports = {
   GAS_PRICE_MAX_GWEI,
   DELAY_SECONDS_MIN,
   DELAY_SECONDS_MAX,
+  TX_SUBMIT_BASE,
+  STX_CONTROLLER_VERSION,
+  DEBUG,
+  REWARDS_API_URL,
+  REWARDS_CLIENT_ID,
+  REWARDS_LANGUAGE,
+  REWARDS_REFERRAL_CODE,
+  REWARDS_SESSIONS_PATH,
   loadWallets
 };
