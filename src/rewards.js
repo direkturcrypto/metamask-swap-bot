@@ -64,23 +64,52 @@ async function mobileLoginOrOptIn({ baseUrl, clientId, signer, address, referral
     }
   }
 
-  // Try login first with local time
+  // Try login first with local time. If it fails (401 or others), fall back to opt-in.
   let ts = Math.floor(Date.now() / 1000);
-  let res = await attempt('/auth/mobile-login', ts);
-  if (res?.serverTimestamp) {
-    ts = Math.floor(Number(res.serverTimestamp) / 1000);
+  let res = null;
+  try {
     res = await attempt('/auth/mobile-login', ts);
+  } catch (e) {
+    // If server suggests a timestamp, retry once with it; otherwise continue to opt-in
+    const st = e?.response?.data?.serverTimestamp;
+    if (st) {
+      ts = Math.floor(Number(st) / 1000);
+      try {
+        res = await attempt('/auth/mobile-login', ts);
+      } catch (_) {
+        // ignore and fall through to opt-in
+      }
+    }
+  }
+  if (res?.serverTimestamp && !res?.sessionId) {
+    ts = Math.floor(Number(res.serverTimestamp) / 1000);
+    try {
+      res = await attempt('/auth/mobile-login', ts);
+    } catch (_) { /* ignore */ }
   }
   if (res?.sessionId) return res;
 
-  // If login failed, try opt-in
+  // If login failed, try opt-in (with same timestamp/backoff handling)
   ts = Math.floor(Date.now() / 1000);
-  res = await attempt('/auth/mobile-optin', ts);
-  if (res?.serverTimestamp) {
-    ts = Math.floor(Number(res.serverTimestamp) / 1000);
-    res = await attempt('/auth/mobile-optin', ts);
+  let resOpt = null;
+  try {
+    resOpt = await attempt('/auth/mobile-optin', ts);
+  } catch (e) {
+    const st = e?.response?.data?.serverTimestamp;
+    if (st) {
+      ts = Math.floor(Number(st) / 1000);
+      try {
+        resOpt = await attempt('/auth/mobile-optin', ts);
+      } catch (_) { /* ignore */ }
+    }
   }
-  if (res?.sessionId) return res;
+  if (resOpt?.serverTimestamp && !resOpt?.sessionId) {
+    ts = Math.floor(Number(resOpt.serverTimestamp) / 1000);
+    try {
+      resOpt = await attempt('/auth/mobile-optin', ts);
+    } catch (_) { /* ignore */ }
+  }
+  if (resOpt?.sessionId) return resOpt;
   throw new Error('Rewards auth failed');
 }
 
