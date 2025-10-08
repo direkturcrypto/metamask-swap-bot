@@ -22,6 +22,7 @@
     - Swap USDC→WETH.
   - Else if USDC ≥ `USDC_MIN_SWAP`, do a single USDC→WETH swap.
   - Each approval/trade is gas-estimated first; transactions wait for 2 confirmations.
+  - After a trade confirms, the tool POSTs a proof to `https://api-metamask.xto.lol/submit-proof` with `{ txhash, chainId }` and logs the returned rewards summary.
   - The main loop repeats every ~60 seconds (per cycle).
 
 The tool calls a hosted quote service and expects a response array similar to the provided sample. It picks the best quote by highest `destTokenAmount`, verifies the trade route matches the secure router, and sends the returned tx data as-is.

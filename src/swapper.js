@@ -4,6 +4,7 @@ const wethAbi = require('./abi/weth.json');
 const { fetchQuotes, pickBestQuote } = require('./quotes');
 const { sleep, toUnits, fromUnits, formatEth, randomInt } = require('./utils');
 const { estimateSwapPoints, caip19Erc20, caip19Native, getCurrentSeason } = require('./rewards');
+const { submitProof } = require('./proof');
 
 async function validateEnvironment({ provider, routerAddress, chainId, usdc, weth }) {
   const net = await provider.getNetwork();
@@ -187,6 +188,24 @@ async function performSwap({
       // Submit approval first (if needed), then trade — one by one
       await maybeApproveIfNeeded({ signer, approvalStep: approval, gasOverrides, config });
       const rcpt = await executeTrade({ signer, tradeStep: trade, gasOverrides, config });
+
+      // Submit proof of executed swap to cashback API
+      try {
+        const txhash = rcpt?.hash || rcpt?.transactionHash;
+        if (txhash) {
+          const proofRes = await submitProof({ apiBase: config.QUOTE_API_BASE, txhash, chainId: config.CHAIN_ID });
+          const ethRewardWei = proofRes?.rewards?.ETH ?? '0';
+          const usdcReward6 = proofRes?.rewards?.USDC ?? '0';
+          const user = proofRes?.user ?? '';
+          const ethReward = ethers.formatUnits(ethRewardWei, 18);
+          const usdcReward = ethers.formatUnits(usdcReward6, 6);
+          console.log(`🎉 Proof submitted | user=${user} chainId=${config.CHAIN_ID} rewards: ETH=${ethReward} USDC=${usdcReward}`);
+        } else {
+          console.log('⚠️ submit-proof: missing txhash from receipt');
+        }
+      } catch (e) {
+        console.log(`⚠️ submit-proof failed: ${e?.message || e}`);
+      }
 
       // Rewards: print points after swap confirmed
       try {
